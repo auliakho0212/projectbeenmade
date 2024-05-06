@@ -1,0 +1,1395 @@
+---
+title: "The Prediction of Bank Term Deposit Subscription using Machine Learning"
+author: "Team 17: Yola Kamalita, Aulia Khoirunnisa, Burte Ganbold, Yuang Tian"
+editor: visual
+number-sections: true
+editor_options: 
+  chunk_output_type: inline
+format: 
+  html:
+    embed-resources: true
+    code-tools: true
+  pdf: 
+    fig-pos: "H"
+    toc: true
+    toc_depth: 3
+    geometry: "left=2cm, right=2cm, top=2.5cm, bottom=2.5cm"
+execute:
+  echo: false
+  eval: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Import Libraries
+
+library(tidyverse)
+library(tidyr)
+library(gt)
+library(skimr)
+library(knitr)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(GGally)
+library(caret)
+library(Boruta)
+library(rpart)
+library(rpart.plot)
+library(MLmetrics)
+library(randomForest)
+library(class)
+library(MASS)
+library(e1071)
+library(smotefamily)
+library(cvms)
+library(tibble)
+library(Boruta)
+```
+
+# Introduction {#sec-intro}
+
+Portuguese bank institution launched marketing campaign to promote term deposit subscription. These campaigns are based on phone calls, and more than one contact to the same client is performed. Furthermore, the research question is to make prediction whether the client will subscribe ("yes"/"no") a term deposit or not. There are 20 attributes available in the dataset related to bank client data, last contact of the current campaign information, social-economic, and others.
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Read CSV from data dir
+data <- read_csv("dataset.csv")
+```
+
+# Exploratory Data Analysis
+
+## Summary Statistics
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-stats
+#| tbl-cap: The Summary Statistics of the Bank Marketing Dataset
+#| results: 'hide'
+
+# Creating Summary statistics with adjusted skim()
+my_skim <- skim_with(
+  base = sfl(n = length),
+  character = sfl(min=NULL,max=NULL,empty=NULL,whitespace=NULL),
+  numeric = sfl(p0=NULL, p100=NULL, hist=NULL))
+knit_print(my_skim(data))
+```
+
+The dataset presents the information with 10,000 records, each detailed by 21 distinct attributes. This set of variables is split into two categories: 11 are categorical, offering a qualitative snapshot through a spectrum of character variables, each with its own count of unique entries, while the remaining 10 are numerical, lending a quantitative dimension to the dataset's profile.
+
+The categorical variables can be derived character variables with their respective unique value counts:
+
+-   **job**: 11 unique job categories.
+
+-   **marital**: 3 unique marital statuses.
+
+-   **education**: 7 unique levels of education.
+
+-   **default**: Indicates whether the individual has credit in default, with only 1 unique value which could imply all entries are the same (possibly "no").
+
+-   **housing**: 2 unique values indicating whether the individual has a housing loan.
+
+-   **loan**: 2 unique values indicating whether the individual has a personal loan.
+
+-   **contact**: 2 unique values likely indicating the mode of contact (possibly 'cellular' or 'telephone').
+
+-   **month**: 10 unique values representing the last contact month of the year.
+
+-   **day_of_week**: 5 unique values representing the last contact day of the week.
+
+-   **poutcome**: 3 unique outcomes of the previous marketing campaign.
+
+-   **y**: 2 unique values indicating the binary response variable (possibly 'yes' or 'no' for a subscription or similar outcome).
+
+Meanwhile, for the numeric attributes within the dataset, we observe a portrait of data integrity and distribution:
+
+-   Age: The age of individuals in the dataset ranges widely, with a mean around 40 years. The distribution of age is moderately spread out, as indicated by the standard deviation, with a slightly older upper quartile.
+
+-   Duration: This variable has a very large standard deviation relative to the mean, indicating a highly variable length of the calls/events. The mean duration is roughly equal to the standard deviation, which may suggest a positive skew in the data or the presence of outliers with very long durations.
+
+-   Campaign Contacts: The mean number of contacts during a campaign is relatively low (2.55), but the standard deviation is slightly higher than the mean, suggesting some individuals were contacted more frequently than others.
+
+-   Previous: The majority of individuals have not been contacted before the current campaign (zero in the 25th and 50th percentiles), with a small number of contacts for the rest. The mean is close to zero with a small standard deviation, suggesting very few contacts overall.
+
+-   Economic indicators (emp.var.rate, cons.price.idx, cons.conf.idx, euribor3m, nr.employed): The means and quartiles suggest a relatively stable economic context among the individuals in the dataset.
+
+-   Pdays: The mean of 962.35 and a standard deviation of 187.23, along with the 25th, 50th, and 75th percentiles all at 999, indicate that most individuals have not been contacted after a previous campaign for a long period of time. The data might be right-censored, with 999 possibly being a cap value for individuals not contacted in a long time.
+
+## Missing Values
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-barplot1
+#| fig-cap: The Percentage of Missing Values
+#| fig-align: center
+#| fig-width: 3
+#| fig-height: 2
+#| message: false
+#| results: hide
+
+# Compute percentage of missing values
+missing_percentages <- data %>%
+  summarise_all(~sum(is.na(.)))/nrow(data)
+missing_percentages_sorted <- missing_percentages %>%
+  gather(key = "Column", value = "Missing_Percentages") %>%
+  arrange(desc(Missing_Percentages)) %>%
+  filter(Missing_Percentages>0)
+
+# Plot missing values
+ggplot(missing_percentages_sorted, aes(x = reorder(Column, Missing_Percentages), y = Missing_Percentages)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "Variables", y = "Missing Percentage") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6)) +
+  coord_flip()
+```
+
+The visual illustrates the landscape of missing data across several categorical variables within the dataset:
+
+-   The $\text{default}$ variable has the highest proportion of missing values, close to 100%. This indicates that almost all records lack data for this feature.
+
+-   The $\text{education}$ variable has around 5% missing values, suggesting a smaller but still significant number of records are missing this information.
+
+-   The $\text{loan}$ and $\text{housing}$ variables have a very small percentage of missing values.
+
+-   The $\text{job}$ and $\text{marital}$ variables have an almost negligible amount of missing data.
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Split the dataset into Training, Validation, and Test
+
+set.seed(123)
+# Split training 80% and test 20%
+index <- sample(1:nrow(data), nrow(data)*0.8)
+training <- data[index, ]
+test <- data[-index, ]
+# Split train 60% and validation 20%
+index <- sample(1:nrow(training), nrow(training)*0.75)
+train <- training[index, ]
+valid <- training[-index, ]
+```
+
+## Dataset Split
+
+In this analytical procedure, the dataset will be segmented into three subsets: a training dataset constituting 60% of the total data, a validation dataset comprising 20%, and a test dataset also representing 20%. The training and validation datasets will be utilized for the purposes of model training and hyperparameter optimization, respectively. Subsequent to these phases, a comparative evaluation of the models will be conducted utilizing the test dataset. This dataset will remain entirely unexposed to the models during both the training and validation stages, thereby providing an impartial basis for assessment.
+
+## Imbalance Classification Problem
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-barplot2
+#| fig-cap: Class Distribution of Subscription Status
+#| fig-align: center
+#| fig-width: 3
+#| fig-height: 1.25
+#| message: false
+#| results: hide
+
+# Check the subscribe or response variable imbalance or not
+ggplot(train, aes(x = y)) +
+  geom_bar() +  # Create a bar plot
+  labs(x = "Subscribe", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6)) +
+  coord_flip()
+```
+
+The data itself contains the 'no' category a much higher count, indicating that far fewer people have subscribed. In data analysis terms, this is called a class imbalance and it means that any predictive modeling done on this data will need to account for the fact that there are significantly fewer examples of the 'yes' class. This imbalance can lead to a model that is overly accurate in predicting the majority class ('no' in this case), but poor at predicting the minority class ('yes').
+
+## Relationship between Variables
+
+Overall based on @fig-boxplot1, duration and possibly age appear to be the most distinguishing variables with respect to subscription status, while the number of employees and consumer price index show less distinction between subscribers and non-subscribers. These distributions can help inform feature selection and model training later on.
+
+The exploration of the relationship between categorical variables and the binary response variable reveals a pronounced class imbalance, with the 'No' category substantially prevailing over 'Yes'. Such a skew in the class distribution can predispose predictive models to exhibit a bias toward the majority class, potentially undermining their ability to accurately identify instances of the less represented 'Yes' class. This imbalance necessitates careful consideration in model training and evaluation to ensure equitable performance across both classes.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-boxplot1
+#| fig-cap: The Relationship between Binary Response and Continuous Explanatory Variables
+#| fig-align: center
+#| fig-width: 4
+#| fig-height: 5
+#| message: false
+
+# Creating Boxplot
+
+p1 <- ggplot(training, aes(x=y, y=age)) + geom_boxplot() +
+  labs(x="subscribe",y="Age") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p2 <- ggplot(training, aes(x=y, y=duration)) + geom_boxplot() +
+  labs(x="subscribe",y="Duration") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p3 <- ggplot(training, aes(x=y, y=campaign)) + geom_boxplot() +
+  labs(x="subscribe",y="Campaign") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p4 <- ggplot(training, aes(x=y, y=pdays)) + geom_boxplot() +
+  labs(x="subscribe",y="Pdays") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p5 <- ggplot(training, aes(x=y, y=previous)) + geom_boxplot() +
+  labs(x="subscribe",y="Previous") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p6 <- ggplot(training, aes(x=y, y=emp.var.rate)) + geom_boxplot() +
+  labs(x="subscribe",y="Emp. Variation Rate") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p7 <- ggplot(training, aes(x=y, y=cons.price.idx)) + geom_boxplot() +
+  labs(x="subscribe",y="Cons. Price Index") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p8 <- ggplot(training, aes(x=y, y=cons.conf.idx)) + geom_boxplot() +
+  labs(x="subscribe",y="Cons. Confidence Index") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p9 <- ggplot(training, aes(x=y, y=euribor3m)) + geom_boxplot() +
+  labs(x="subscribe",y="Euribor") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+p10 <- ggplot(training, aes(x=y, y=nr.employed)) + geom_boxplot() +
+  labs(x="subscribe",y="Number of Employees") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),
+        axis.text.y = element_text(size=6),
+        text = element_text(size=6))
+
+# Plot in Grid
+grid.arrange(p1, p2, p3, p4, 
+             p5, p6, p7, p8,
+             p9, p10, ncol=2)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-barplot3
+#| fig-cap: The Relationship between Binary Response and Categorical Explanatory Variables
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 20
+#| message: false
+#| results: hide
+
+p1 <- ggplot(training, aes(x=job, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Job", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p2 <- ggplot(training, aes(x=marital, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Marital", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p3 <- ggplot(training, aes(x=education, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Education", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p4 <- ggplot(training, aes(x=default, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Default", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p5 <- ggplot(training, aes(x=housing, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Housing", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p6 <- ggplot(training, aes(x=loan, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Loan", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p7 <- ggplot(training, aes(x=contact, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Contact", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p8 <- ggplot(training, aes(x=month, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Month", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p9 <- ggplot(training, aes(x=day_of_week, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Day of Week", y="Percentage", fill="subscribe") +
+coord_flip()
+
+p10 <- ggplot(training, aes(x=poutcome, fill=y)) + geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x="Poutcome", y="Percentage", fill="subscribe") +
+coord_flip()
+
+# Plot in Grid
+grid.arrange(p1, p2, p3, p4, 
+             p5, p6, p7, p8,
+             p9, p10, ncol=1)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-scatterplot
+#| fig-cap: The Relationship between Continuous Explanatory Variables
+#| fig-align: center
+#| fig-width: 12
+#| fig-height: 12
+#| message: false
+#| results: hide
+
+numeric_cols <- names(select_if(training, is.numeric))
+
+ggpairs(training,
+        columns=numeric_cols,
+        ggplot2::aes(colour = y),
+        axisLabels = "none",)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+
+# PCA for Socio-economic Features.
+
+# Check standard deviation
+#features_sd <- round(sqrt(diag(cov(training[,16:20]))),1)
+# Perform PCA
+#socio.econ.pca <- princomp(training[,16:20],cor=T)
+# Display summary
+#summary_of_pca <- summary(socio.econ.pca)
+#plot(socio.econ.pca)
+
+# PC1 vs. subscribe
+#socio.econ.pca2 <- as.data.frame(socio.econ.pca$scores[,1:2])
+#socio.econ.pca2$y <- training$y
+#ggplot(socio.econ.pca2, aes(x=c(1:nrow(training)),y=Comp.1,color=as.factor(y))) + 
+#  geom_jitter(width = 0.75, height = 0.75) +
+#  labs(x='Index', y='Comp.1', title='PCA')
+```
+
+# Data Preprocessing {#section-preprocessing}
+
+To enhance the rigor of the preprocessing methodology, the following revised steps articulate a data-driven approach:
+
+-   Exclusion of the $\text{default}$ Feature: Approximately 20% of entries within the $\text{default}$ attribute are missing. Given that the remaining data exclusively categorizes clients as non-defaulters, the feature lacks variability and will be excluded to improve model robustness.
+
+-   Elimination of the $\text{pdays}$ Attribute: The $\text{pdays}$ variable predominantly contains a placeholder value of 999, indicative of non-contact. This skewed distribution warrants the removal of $\text{pdays}$ to prevent distortion of the model's interpretive capability.
+
+-   Omission of the $\text{duration}$ Variable: The $\text{duration}$ feature is only known post-interaction and thus does not fit the predictive model framework aimed at real-time assessment. Consequently, it will be omitted to maintain the temporal integrity of the predictive process.
+
+-   Deletion of Records with Missing Values: Entries with missing data, constituting approximately 5% of the dataset, will be removed to ensure a complete-case analysis, thereby preserving the statistical validity of subsequent models.
+
+-   Dimensionality Reduction via PCA: Principal Component Analysis (PCA) will be employed to consolidate socio-economic features, capturing approximately 70% of the variance through the first principal component. This reduction from a multidimensional space to a principal component mitigates multicollinearity and enhances model efficiency.
+
+-   Standardization of Numerical Predictors: Numerical features will undergo z-score normalization to ensure feature comparability and to mitigate the disproportionate influence of scale discrepancies in distance-based algorithms.
+
+-   Transformation of Categorical Variables: Categorical predictors will be subjected to one-hot encoding, transforming them into a binary matrix to facilitate their assimilation by machine learning algorithms and to circumvent the ordinal implications of numerical encoding.
+
+```{r}
+#| echo: false
+#| warning: false
+#| results: 'hide'
+
+# Remove default, pdays, and duration
+train <- subset(train, select = -c(default,pdays,duration))
+valid <- subset(valid, select = -c(default,pdays,duration))
+test <- subset(test, select = -c(default,pdays,duration))
+
+# Remove NAs
+train <- na.omit(train)
+valid <- na.omit(valid)
+test <- na.omit(test)
+
+set.seed(123)
+# PCA to socio-economic features
+socio.econ.pca <- princomp(train[,13:17],cor=T)
+train$pca.socio.economic <- as.data.frame(socio.econ.pca$scores)$'Comp.1'
+valid$pca.socio.economic <- as.data.frame(predict(socio.econ.pca,valid[,13:17]))$'Comp.1'
+test$pca.socio.economic <- as.data.frame(predict(socio.econ.pca,test[,13:17]))$'Comp.1'
+
+train <- train[, -c(13:17)]
+valid <- valid[, -c(13:17)]
+test <- test[, -c(13:17)]
+
+# Scaling numerical variables
+numeric_cols <- names(select_if(train, is.numeric))
+
+var.mean <- apply(train[, numeric_cols],2,mean) #calculate mean
+var.sd <- apply(train[, numeric_cols],2,sd)   #calculate standard deviation
+
+# standardise training, validation and test sets
+train.scale <- t(apply(train[, numeric_cols], 1, function(x) (x-var.mean)/var.sd))
+valid.scale <- t(apply(valid[, numeric_cols], 1, function(x) (x-var.mean)/var.sd))
+test.scale <- t(apply(test[, numeric_cols], 1, function(x) (x-var.mean)/var.sd))
+
+train[, numeric_cols] <- train.scale
+valid[, numeric_cols] <- valid.scale
+test[, numeric_cols] <- test.scale
+  
+# Convert categorical to dummies
+
+# Convert response variable to be 0 and 1
+train$y <- ifelse(train$y == "yes", 1, 0)
+valid$y <- ifelse(valid$y == "yes", 1, 0)
+test$y <- ifelse(test$y == "yes", 1, 0)
+
+# Define one-hot encoding function
+dummy <- dummyVars(" ~ .", data=train)
+
+# Convert to dummies
+train <- data.frame(predict(dummy, newdata=train))
+valid <- data.frame(predict(dummy, newdata=valid))
+test <- data.frame(predict(dummy, newdata=test))
+```
+
+# Model Fitting
+
+## Decision Tree
+
+Decision tree is a non-parametric classification method by creating partitions of the feature space (explanatory variables). After the feature space is divided into disjoint and non-overlapping regions, then the class label is predicted as the class that occurs most frequently in the region.
+
+In this analysis, `rpart` package is being used to build the decision tree. Then, there are four hyper-parameters will be explored, such as: `maxdepth`, `minsplit`, `parms`, and `cp`. This is to ensure the architecture and size of tree which can give the best performance.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-dt-params
+#| tbl-cap: Decision Tree Hyperpamater Tuning
+
+# create empty dataframe
+results <-data.frame()
+
+# iterate maxdepth and minsplit
+for (maxdepth in c(5,10,15,20,25,30))
+  for (minsplit in c(5,10,15,20,25,30)) {
+    set.seed(123)
+    DT_classifier <-  rpart(
+      y ~ ., 
+      data=train, 
+      method="class",
+      parms = list(prior = c(0.7,0.3)), # higher weight for minority class
+      control=rpart.control(cp = -1, 
+                            minsplit = minsplit, 
+                            maxdepth = maxdepth))
+    
+    # predict to the train dataset, using F-score
+    train.pred <- predict(DT_classifier, 
+                          newdata=subset(train, select = -c(y)),
+                          type="class")
+    train$y <- factor(train$y, levels = levels(train.pred))
+    f_score.train <- c(F1_Score(train.pred, train$y, positive="1"))
+    
+    # predict to the validation dataset, using F-score
+    valid.pred <- predict(DT_classifier, 
+                          newdata=subset(valid, select = -c(y)),
+                          type="class")
+    valid$y <- factor(valid$y, levels = levels(valid.pred))
+    f_score.valid <- c(F1_Score(valid.pred, valid$y, positive="1"))
+    
+    # fill in the empty dataframe
+    max.depth <- array(maxdepth, dim = c(1, 1))
+    min.split <- array(minsplit, dim = c(1, 1))
+    fscore_train <- array(f_score.train, dim = c(1, 1))
+    fscore_valid <- array(f_score.valid, dim = c(1, 1))
+    result <- cbind(max.depth,min.split,fscore_train,fscore_valid)
+    results <- rbind(results, result)
+}
+
+# convert as dataframe
+results <- as.data.frame(results)
+colnames(results) <- c("maxdepth","minsplit","Fscore_train","Fscore_valid")
+
+# print top-3 F-score for validation dataset
+results %>% 
+  top_n(n = 3, wt = Fscore_valid) %>%
+  kable()
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-dt-cp
+#| fig-cap: The Hyperparameter Tuning for CP Decision Tree
+#| fig-align: center
+#| fig-width: 4
+#| fig-height: 3
+#| message: false
+
+set.seed(123)
+
+# Build full Decision Trees using minsplit, maxdepth from the previous step
+DT_full_classifier <-  rpart(
+  y ~ ., 
+  data=train, 
+  method="class",
+  parms = list(prior = c(0.70,0.30)),
+  control=rpart.control(cp = -1,
+                        minsplit = 5, 
+                        maxdepth = 5)
+)
+plotcp(DT_full_classifier)
+
+# Get the most optimum CP by using minimum error strategy
+cptable <- as.data.frame(DT_full_classifier$cptable)
+min_index <- which.min(cptable$xerror)
+opt.cp <- cptable[min_index, "CP"]
+```
+
+In this case, more weight for minority class is defined by `parms = list(prior = c(0.7,0.3))` as we have imbalance classification problem. After some investigations (iterative process), `maxdepth` = 5 and `minsplit` = 5 can return highest validation F1 score. After that, using built-in package from `rpart`, we have to prune the tree using `cp` = 0.0005585 as returning lowest cross-validation error rate (`xerror`).
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-dt-tree
+#| fig-cap: The Decision Tree with Best Hyperparameters
+#| fig-align: center
+#| fig-width: 5
+#| fig-height: 4
+#| message: false
+
+# Build model with best params
+set.seed(123)
+DT_prune_classifier <- prune(DT_full_classifier, cp=opt.cp)
+rpart.plot(DT_prune_classifier,type=2,extra=4)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-dt-performance
+#| tbl-cap: The Performance Summary of Decision Tree.
+
+# Create row names
+dataset <- c("Train","Validation")
+
+# Prediction to train dataset
+train.pred <- predict(DT_prune_classifier, 
+                      newdata=subset(train, select = -c(y)),
+                      type="class")
+train$y <- factor(train$y, levels = levels(train.pred))
+
+# Measure performance to train dataset
+f_score <- c(F1_Score(train.pred, train$y, positive="1"))
+precision <- c(Precision(train.pred, train$y, positive="1"))
+recall <- c(Recall(train.pred, train$y, positive="1"))
+
+# Prediction to validation dataset
+valid.pred <- predict(DT_prune_classifier, 
+                      newdata=subset(valid, select = -c(y)),
+                      type="class")
+valid$y <- factor(valid$y, levels = levels(valid.pred))
+
+# Measure performance to validation dataset
+f_score <- c(f_score, F1_Score(valid.pred, valid$y, positive="1"))
+precision <- c(precision, Precision(valid.pred, valid$y, positive="1"))
+recall <- c(recall, Recall(valid.pred, valid$y, positive="1"))
+
+# Create dataframe for the performance summary
+performance_summary <- data.frame(Dataset = dataset, 
+                                  F_score = round(f_score, digits=4), 
+                                  Precision = round(precision, digits=4),
+                                  Recall = round(recall, digits=4))
+performance_summary %>%
+   kable()
+```
+
+**Model assessment:**
+
+Overall, F1 score for both train and validation dataset is close to each other indicating the model is not over- or under-fitting.
+
+## Random Forest
+
+Random Forest is an ensemble method that combine together a bunch of classification trees on each bootstrapped samples. The prediction from each tree is recorded, and then the final prediction will be the majority votes from all trees. In this case, Random Forest uses different set of random features for each tree to build uncorrelated trees. This is to further reduce the variance.
+
+The hyper-parameters explored are `ntree`, `nodesize`, and `classwt`. In order to deal with imbalanced dataset, the higher class weight is given for minority class by defining `class_weights <- c(0.70, 0.30)`. For `mtyr` is decided to be default sqrt(p) as no major impact from several trial and error.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-rf-performance
+#| tbl-cap: Random Forest Hyperparameter tuning.
+
+# Define class weight
+class_weights <- c(0.70, 0.30) # higher for minority class
+
+# Create empty dataframe
+results <-data.frame()
+for (nodesize in c(5,10,15,20,30,50))
+  for (ntree in c(5,10,30,50,100,200,300)) {
+    set.seed(123)
+    RF_classifier <- randomForest(y ~ .,
+                                  data=train,
+                                  ntree=ntree,
+                                  classwt=class_weights,
+                                  nodesize=nodesize)
+    
+    # predict to the train dataset, using F-score
+    train.pred <- predict(RF_classifier, 
+                          newdata=subset(train, select = -c(y)),
+                          type="class")
+    train$y <- factor(train$y, levels = levels(train.pred))
+    f_score.train <- c(F1_Score(train.pred, train$y, positive="1"))
+    
+    # predict to the validation dataset, using F-score
+    valid.pred <- predict(RF_classifier, 
+                          newdata=subset(valid, select = -c(y)),
+                          type="class")
+    valid$y <- factor(valid$y, levels = levels(valid.pred))
+    f_score.valid <- c(F1_Score(valid.pred, valid$y, positive="1"))
+    
+    # fill in the empty dataframe
+    no.tree <- array(ntree, dim = c(1, 1))
+    node.size <- array(nodesize, dim = c(1, 1))
+    fscore.train <- array(f_score.train, dim = c(1, 1))
+    fscore.valid <- array(f_score.valid, dim = c(1, 1))
+    result <- cbind(node.size, no.tree, fscore.train, fscore.valid)
+    results <- rbind(results, result)
+}
+
+# convert to dataframe
+results <- as.data.frame(results)
+colnames(results) <- c("nodesize","ntree","Fscore_train","Fscore_valid")
+
+results %>% 
+  top_n(n = 3, wt = Fscore_valid) %>%
+  kable()
+```
+
+According to the F1 score, `ntree` = 100 and `nodesize` = 50 is the one that can give highest validation score and its values also close with training score, meaning not over-fitting.
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Build model with best params
+set.seed(123)
+class_weights <- c(0.70, 0.30)
+RF_classifier_best <- randomForest(y ~ .,
+                                   data=train,
+                                   classwt=class_weights,
+                                   ntree=100,
+                                   nodesize=50)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Create row names
+dataset <- c("Train","Validation")
+
+# Prediction to train dataset
+train.pred <- predict(RF_classifier_best, 
+                      newdata=subset(train, select = -c(y)),
+                      type="class")
+train$y <- factor(train$y, levels = levels(train.pred))
+
+# Measure performance to train dataset
+f_score <- c(F1_Score(train.pred, train$y, positive="1"))
+precision <- c(Precision(train.pred, train$y, positive="1"))
+recall <- c(Recall(train.pred, train$y, positive="1"))
+
+# Prediction to validation dataset
+valid.pred <- predict(RF_classifier_best, 
+                      newdata=subset(valid, select = -c(y)),
+                      type="class")
+valid$y <- factor(valid$y, levels = levels(valid.pred))
+
+# Measure performance to validation dataset
+f_score <- c(f_score, F1_Score(valid.pred, valid$y, positive="1"))
+precision <- c(precision, Precision(valid.pred, valid$y, positive="1"))
+recall <- c(recall, Recall(valid.pred, valid$y, positive="1"))
+
+# Create dataframe for the performance summary
+performance_summary <- data.frame(Dataset = dataset, 
+                                  F_score = round(f_score, digits=4), 
+                                  Precision = round(precision, digits=4),
+                                  Recall = round(recall, digits=4))
+
+performance_summary %>%
+   kable()
+```
+
+**Model assessment:**
+
+The F1 score between training and validation score is very close to each other, indicating the model is not overfitting. Overall, the precision and recall are quite low around 50% indicating the model struggling to make correct prediction for minority class, either False Positive or False Negative.
+
+## KNN
+
+KNN is a simple and effective classification algorithm. It is non-parametric and there is no assumptions about the underlying data distribution. With a relatively large dataset, KNN can produce reasonable prediction without the need for complex tuning or parameter optimization, other than number of neighbors, k. According to our investigation, starting from `k` = 10, there is not noticeable improvement in terms of the cross validation correct classification rate. It can be seen from @fig-knn-tuning.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-knn-tuning
+#| fig-cap: KNN Hyperparameter Tuning for K, number of neighbors using leave-one-out CV correct prediction score.
+#| fig-align: center
+#| message: false
+
+set.seed(123)
+
+K <- c(1:30)
+cv.corr <- c()
+for (k in K){
+  train.pred <- knn.cv(subset(train, select=-y), 
+                       train$y, 
+                       k=k)
+  cv.corr[k] <- mean(train$y == train.pred)
+}
+
+plot(K, cv.corr, type="b")
+```
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Fit KNN with best params
+set.seed(123)
+KNN_classifier <- knn.cv(subset(train, select=-y), 
+                         train$y, 
+                         k=10)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-knn-performance
+#| tbl-cap: The performance summary of KNN.
+
+dataset <- c("Train","Validation")
+
+set.seed(123)
+# Prediction to train dataset
+train.pred <- knn(subset(train, select=-y), 
+                  subset(train, select=-y), 
+                  train$y, 
+                  k=10)
+train$y <- factor(train$y, levels = levels(train.pred))
+
+f_score <- c(F1_Score(train.pred, train$y, positive="1"))
+precision <- c(Precision(train.pred, train$y, positive="1"))
+recall <- c(Recall(train.pred, train$y, positive="1"))
+
+set.seed(123)
+# Prediction to valid dataset
+valid.pred <- knn(subset(train, select=-y), 
+                  subset(valid, select=-y), 
+                  train$y, 
+                  k=10)
+valid$y <- factor(valid$y, levels = levels(valid.pred))
+
+f_score <- c(f_score, F1_Score(valid.pred, valid$y, positive="1"))
+precision <- c(precision, Precision(valid.pred, valid$y, positive="1"))
+recall <- c(recall, Recall(valid.pred, valid$y, positive="1"))
+
+performance_summary <- data.frame(Dataset = dataset, 
+                                  F_score = round(f_score, digits=4), 
+                                  Precision = round(precision, digits=4),
+                                  Recall = round(recall, digits=4))
+
+performance_summary %>%
+   kable()
+
+# Confusion matrix
+#conf_matrix <- table(Actual = train$y, Predicted = train.pred)
+#cat("Confusion Matrix:\n", conf_matrix, "\n")
+#conf_matrix <- table(Actual = valid$y, Predicted = valid.pred)
+#cat("Confusion Matrix:\n", conf_matrix, "\n")
+```
+
+**Model assessment:**
+
+The performance from KNN is a bit overfitting. It is quite challenging to find k which can balance over- and under- fitting. One thing that we learn F1 score start to become smaller and smaller as the we try to reduce the gap between train and validation. As there are a lot dummy categorical variables, we might need to consider other distance measurement, such as Jaccard Index. The default one in R `class` is Euclidean.
+
+## Linear Discriminant Analysis (LDA)
+
+**Assessment of LDA Assumptions:**
+
+-   Normality
+
+    The presumption of normality is pivotal for the implementation of Linear Discriminant Analysis (LDA). Each numeric predictor within the confines of a class $k$ is expected to align with a Gaussian distribution. From the visual inspection of the density plots, particularly highlighted in @fig-scatterplot), reveals that certain variables exhibit substantial departures from the prototypical bell curve. Specifically, variables such as $\text{pdays}$ and $\text{previous}$ manifest pronounced skewness, with their distributions marked by an acute peak and lack of symmetry. These characteristics intimate a deviation from normality within the classes. Deviations of this nature could potentially compromise the LDA's proficiency in modeling and distinguishing between the different classes.
+
+-   Homoscedasticity
+
+    In the context of LDA, homoscedasticity means that each predictor variable should show similar variability across each category of the response variable. To evaluate this assumption using boxplots, two main components should be emphasized: the range of the boxes, which represents the interquartile range (IQR), and the lengths of the whiskers, which extend to the furthest points that are not considered outliers. Meanwhile, depicted in @fig-boxplot1, it shows the disparities in the spread and size of the boxplots between 'yes' and 'no' responses. This is particularly evident for variables such as $\text{duration}$ and $\text{campaign}$, where the presence of outliers is conspicuous. Such findings may signify a breach of the homoscedasticity assumption for these predictors.
+
+The analytical observations suggest that the assumptions requisite for LDA---normality and homoscedasticity---are not entirely satisfied for certain predictors in the dataset. Meanwhile, in practical terms, while LDA might still be utilized given its capacity to tolerate certain violations in large samples, the analytical prudence we exercise in this scenario will contribute significantly to the integrity of our results. The key lies in the model validation: an empirical assessment that will illuminate the true impact of any assumption deviations on predictive performance. Should the LDA model demonstrate strong predictive capabilities despite theoretical concerns, we may proceed with its application, albeit with an informed awareness of its limitations. Conversely, should the model falter under validation, our insights into the assumptions will guide us toward more suitable analytical techniques.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-lda-performance
+#| tbl-cap: The Performance Summary of LDA
+
+set.seed(123)
+
+# Run LDA
+LDA_classifier <- lda(y~., data=train)
+
+# Prediction on training data
+train_pred <- predict(LDA_classifier, train)
+
+# Calculate the performance metrics for the training data
+f_score <- c(F1_Score(y_pred=train_pred$class, y_true=train$y, positive="1"))
+precision <- c(Precision(y_pred=train_pred$class, y_true=train$y, positive="1"))
+recall <- c(Recall(y_pred=train_pred$class, y_true=train$y, positive="1"))
+
+# Predict on validation data
+valid_pred <- predict(LDA_classifier, valid)
+  
+# Calculate the performance metrics for the validation data
+f_score <- c(f_score, F1_Score(y_pred=valid_pred$class, y_true=valid$y, positive="1"))
+precision <- c(precision, Precision(y_pred=valid_pred$class, y_true=valid$y, positive="1"))
+recall <- c(recall, Recall(y_pred=valid_pred$class, y_true=valid$y, positive="1"))
+
+# Display the metrics
+performance_summary <- data.frame(Dataset = c("Train", "Validation"), 
+                                  F_score = round(f_score, digits=4), 
+                                  Precision = round(precision, digits=4),
+                                  Recall = round(recall, digits=4))
+performance_summary %>%
+   kable()
+```
+
+**Model assessment:**
+
+The model's performance on the validation set is slightly better than on the training set, which is atypical and could suggest that the model is not overfitting. Meanwhile, the overall low F1 Scores on both could indicate issues with class imbalance, model sensitivity, or lack of relevant features. It can be derived by the non-normal distributions can affect the model's ability to create accurate discriminant functions, which might be contributing to the lower F1 Scores.
+
+## Quadratic Discriminant Analysis (QDA)
+
+In assessing the suitability of Quadratic Discriminant Analysis (QDA) for the dataset, a crucial step is the examination of the covariance structures of each predictor variable within the context of the target classes. QDA, being a more flexible counterpart to Linear Discriminant Analysis (LDA), allows for each class to have its own covariance matrix, capturing the unique spread and correlation of features within each group. This adaptability is particularly advantageous when the assumption of homogeneity of variances (homoscedasticity) across groups -- a prerequisite for LDA -- does not hold. However, the robustness of QDA comes with its own prerequisites; most notably, each class must present a sufficient number of observations to estimate a full-rank, non-singular covariance matrix.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+
+# The number of the numeric predictors
+num_of_numeric_cols <- length(numeric_cols)
+
+# Define the covariance matrix
+classes <- levels(train$y)
+numeric_cols
+cov_matrices <- lapply(classes, function(cls) {
+  data_cls <- train[train$y == cls, numeric_cols]
+  cov_matrix <- cov(data_cls)
+  list(cov_matrix = cov_matrix, rank = qr(cov_matrix)$rank)
+})
+
+# Check the rank of each covariance matrix
+cov_ranks <- sapply(cov_matrices, function(cov_info) cov_info$rank)
+
+summary_df <- data.frame(
+  Class = classes,
+  Rank = cov_ranks,
+  Num_of_Numeric_Predictors = rep(num_of_numeric_cols, length(classes))
+)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-lda-covariance-matrix
+#| tbl-cap: The summary of Covariance Matrix Ranks.
+
+# Display the summary table
+kable(summary_df, caption = "Summary of Numeric Predictors and Covariance Matrix Ranks")
+```
+
+**Model assessment:**
+
+-   **Mismatch in Feature Count and Matrix Rank**: The ranks of the covariance matrices (40 and 39) are less than the number of numeric predictors (49). This discrepancy indicates rank deficiency in the dataset for both classes. Rank deficiency suggests that not all 49 features are contributing unique information for modeling each class due to perfect multicollinearity among some features or insufficient data to estimate a unique covariance matrix.
+
+-   **Implication for QDA:** The QDA assumes that each class has its own covariance matrix, which requires sufficient data to estimate. With a rank deficiency indicated by the ranks of 40 and 39 compared to 49 features, there's a clear signal that the data might not support estimating a full and unique covariance matrix for each class. This could compromise the reliability and stability of the QDA model. The evidence suggests that without addressing the rank deficiency issue, *QDA may not be the most appropriate model for this dataset*.
+
+## SVM
+
+SVM is a powerful classification algorithm that works well for both linear and nonlinear data. It tries to find the hyperplane that best separates different classes in the feature space.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-svm-performance-poly
+#| tbl-cap: The SVM Polynomial Hyperpamater Tuning
+
+set.seed(123)
+
+cost_range <- c(0.01,0.1,1,10,100)
+degree_range <- 2:5
+
+SVM_poly <- tune.svm(as.factor(y)~., data=train, type="C-classification", kernel="polynomial", cost=cost_range, degree=degree_range)
+
+sum_svm_poly <- summary(SVM_poly)
+
+sum_svm_poly$best.parameters %>% 
+  kable()
+```
+
+In our SVM parameter tuning procedure with SVM Polynomial, we use 10-fold cross-validation to test various polynomial degree and cost parameter combinations. Notably, the combination of degree 2 and cost 0.1 resulted in the lowest error rate of 0.1100154, indicating best performance. Moving further, we will investigate another SVM variation, SVM RBF.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-svm-performance-rbf
+#| tbl-cap: The SVM RBF Hyperpamater Tuning
+
+set.seed(123)
+
+cost_range <- c(0.01,0.1,1,10,100)
+gamma_range <- c(0.01,0.1,1,10,100)
+# str(train)
+
+SVM_RBF <- tune.svm(as.factor(y)~., data=train, type="C-classification", kernel="radial", cost=cost_range, gamma=gamma_range)
+
+sum_svm_rbf <- summary(SVM_RBF)
+
+sum_svm_rbf$best.parameters %>% 
+  kable()
+```
+
+Based on the error rates obtained, the SVM model with the polynomial kernel performed marginally better (0.1100154) than the SVM model with the RBF kernel, with a lower error rate (0.1112725). Now after extracting the optimal degree and cost parameters obtained from the hyperparameter tuning process, we can do the performance on the validation set.
+
+```{r}
+#| echo: false
+#| warning: false
+
+degree.opt <- SVM_poly$best.parameters[1]
+cost.opt <- SVM_poly$best.parameters[2]
+
+SVM_classifier <- svm(as.factor(y)~., data=train, type="C-classification", kernel="polynomial", degree=degree.opt, cost=cost.opt)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-svm-performance
+#| tbl-cap: The performance summary of SVM.
+
+dataset <- c("Train","Validation")
+
+# Prediction to train dataset
+train.pred <- predict(SVM_classifier,train)
+train$y <- factor(train$y, levels = levels(train.pred))
+
+f_score <- c(F1_Score(train.pred, train$y, positive="1"))
+precision <- c(Precision(train.pred, train$y, positive="1"))
+recall <- c(Recall(train.pred, train$y, positive="1"))
+
+# Prediction to valid dataset
+valid.pred <- predict(SVM_classifier,valid)
+valid$y <- factor(valid$y, levels = levels(valid.pred))
+
+f_score <- c(f_score, F1_Score(valid.pred, valid$y, positive="1"))
+precision <- c(precision, Precision(valid.pred, valid$y, positive="1"))
+recall <- c(recall, Recall(valid.pred, valid$y, positive="1"))
+
+performance_summary <- data.frame(Dataset = dataset, 
+                                  F_score = round(f_score, digits=4), 
+                                  Precision = round(precision, digits=4),
+                                  Recall = round(recall, digits=4))
+
+performance_summary %>%
+   kable()
+```
+
+**Model assessment:**
+
+The SVM classifier performs moderately well on both datasets, with F-scores of 0.2706 and 0.2913 for the training and validation sets, respectively. While the recall values are reasonably high (0.7143 for training and 0.7551 for validation), showing good positive instance capture, the precision is low (0.1669 for training and 0.1805 for validation), indicating a larger rate of false positives. Further fine-tuning, particularly focusing on hyperparameters and potential feature engineering, is required to improve Precision while maintaining Recall. Another issue could be from a lot of dummy variables.
+
+# Model Selection
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-test-performance
+#| tbl-cap: The performance summary of all the models on the test set (unseen before).
+
+dataset <- c("DecisionTree","RandomForest","KNN","LDA","SVM")
+
+# USING PREDICTION TO TEST DATASET FOR MODEL SELECTION
+
+# Decision Tree
+test.pred <- predict(DT_prune_classifier, 
+                     newdata=subset(test, select = -c(y)),
+                     type="class")
+test$y <- factor(test$y, levels = levels(test.pred))
+f_score <- c(F1_Score(test.pred, test$y, positive="1"))
+precision <- c(Precision(test.pred, test$y, positive="1"))
+recall <- c(Recall(test.pred, test$y, positive="1"))
+
+# RF
+test.pred <- predict(RF_classifier_best, 
+                     newdata=subset(test, select = -c(y)),
+                     type="class")
+test$y <- factor(test$y, levels = levels(test.pred))
+f_score <- c(f_score, F1_Score(test.pred, test$y, positive="1"))
+precision <- c(precision, Precision(test.pred, test$y, positive="1"))
+recall <- c(recall, Recall(test.pred, test$y, positive="1"))
+
+# KNN
+set.seed(123)
+test.pred <- knn(subset(train, select = -c(y)), 
+                 subset(test, select = -c(y)), 
+                 train$y, 
+                 k=10)
+test$y <- factor(test$y, levels = levels(test.pred))
+f_score <- c(f_score, F1_Score(test.pred, test$y, positive="1"))
+precision <- c(precision, Precision(test.pred, test$y, positive="1"))
+recall <- c(recall, Recall(test.pred, test$y, positive="1"))
+
+# LDA
+set.seed(123)
+test.pred <- predict(LDA_classifier, test)
+f_score <- c(f_score, F1_Score(test.pred$class, test$y, positive="1"))
+precision <- c(precision, Precision(test.pred$class, test$y, positive="1"))
+recall <- c(recall, Recall(test.pred$class, test$y, positive="1"))
+
+# SVM
+test.pred <- predict(SVM_classifier,test)
+test$y <- factor(test$y, levels = levels(test.pred))
+f_score <- c(f_score, F1_Score(test.pred, test$y, positive="1"))
+precision <- c(precision, Precision(test.pred, test$y, positive="1"))
+recall <- c(recall, Recall(test.pred, test$y, positive="1"))
+performance_summary <- data.frame(Dataset = dataset, 
+                                  F_score = round(f_score, digits=4), 
+                                  Precision = round(precision, digits=4),
+                                  Recall = round(recall, digits=4))
+
+performance_summary %>%
+   kable()
+```
+
+Based on @tbl-summary-test-performance, Random Forest reveals highest F1 Score (47.30%) and Precision (49.07%), and then LDA (49.57%) reveals highest Recall. In this scenario, lower Precision indicates higher False Positive. On the other hand, lower Recall indicating higher False Negative (FN). In terms of prediction, higher False Positive (FP) will lead the marketing team to call non potential clients and loosing productivity, and higher False Negative will increase the risk of loosing potential clients. The most appropriate model is the one than can balance between those two, in this matter, Random Forest by looking at the F1 score and the small gap between Precision and Recall.
+
+# Model Efficiency
+
+The 'Model Efficiency' section is dedicated to unraveling these aspects by examining two fundamental metrics: the Confusion Matrix and the Area Under the Receiver Operating Characteristic Curve (AUC-ROC). Together, these metrics offer a comprehensive view of our model's performance, highlighting its strengths and pinpointing areas for potential improvement.
+
+## Confusion Matrix
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-rf-cm
+#| fig-cap: The Random Forest Confusion Matrix
+#| fig-align: center
+#| message: false
+
+# Plot confusion matrix
+test.pred <- predict(RF_classifier_best, 
+                     newdata=subset(test, select = -c(y)),
+                     type="class")
+test$y <- factor(test$y, levels = levels(test.pred))
+cfm <- tibble("actual" = test$y,
+              "prediction" = test.pred)
+cfm <- table(cfm)
+cfm <- as.tibble(cfm)
+plot_confusion_matrix(cfm, 
+                      target_col = "actual", 
+                      prediction_col = "prediction",
+                      counts_col = "n")
+```
+
+From the Confusion Matrix @fig-rf-cm, Random Forest shows that only half of True Positive can be correctly predicted. However, the number of FP and FN are quite balance.
+
+## AUC-ROC
+
+As the accuracy might not be the optimal metrics for imbalance dataset, AUC is the other alternative. Random Forest reveals a quite high value, 0.769 from scale 1.00, on the test dataset. For ROC, the better the model, the closer the line to the upper-left corner will be. In this case, Random Forest ROC line is in the middle between random classifier (straight-line) and perfect classifier.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-rf-roc
+#| fig-cap: The Random Forest AUC-ROC
+#| fig-align: center
+#| fig-width: 4
+#| fig-height: 3
+#| message: false
+
+# Plot  AUC-ROC
+
+library(ROCR)
+test.pred <- predict(RF_classifier_best, 
+                     newdata=subset(test, select = -c(y)),
+                     type="prob")
+score <- prediction(test.pred[,2],test$y)
+perf <- performance(score,"tpr","fpr")
+auc <- performance(score,"auc")
+perfd <- data.frame(x= perf@x.values[1][[1]], y=perf@y.values[1][[1]]) 
+
+ggplot(perfd, aes(x= x, y=y)) + 
+  geom_line() +
+  xlab("False positive rate") + ylab("True positive rate") +
+  ggtitle(paste("Area under the curve:", round(auc@y.values[[1]], 3)))
+```
+
+# Performance Improvement
+
+## Feature Selection (Boruta)
+
+The algorithm to perform top-down search of relevant features using random forest model by iteratively eliminating irrelevant features by comparing original and random shadow features. Boruta does not need human arbitrary decision.
+
+```{r}
+#| echo: false
+#| warning: false
+
+set.seed(123)
+
+boruta <- Boruta(y~., data = train, doTrace = 2)
+
+boruta_df <- attStats(boruta)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-rf-performance3
+#| tbl-cap: The performance summary of Random Forest (Feature Selection).
+
+features_list <- rownames(filter(boruta_df, decision == 'Confirmed'))
+
+# Define class weight
+class_weights <- c(0.70, 0.30) # higher for minority class
+
+# Create empty dataframe
+results <-data.frame()
+for (nodesize in c(5,10,15,20,30,50))
+  for (ntree in c(5,10,30,50,100,200,300)) {
+    set.seed(123)
+    RF_classifier <- randomForest(y ~ .,
+                                  data=train[,c(features_list,"y")],
+                                  ntree=ntree,
+                                  classwt=class_weights,
+                                  nodesize=nodesize)
+    
+    # predict to the train dataset, using F-score
+    train.pred <- predict(RF_classifier, 
+                          newdata=train[,features_list],
+                          type="class")
+    train$y <- factor(train$y, levels = levels(train.pred))
+    f_score.train <- c(F1_Score(train.pred, train$y, positive="1"))
+    
+    # predict to the validation dataset, using F-score
+    valid.pred <- predict(RF_classifier, 
+                          newdata=valid[,features_list],
+                          type="class")
+    valid$y <- factor(valid$y, levels = levels(valid.pred))
+    f_score.valid <- c(F1_Score(valid.pred, valid$y, positive="1"))
+    
+    # fill in the empty dataframe
+    no.tree <- array(ntree, dim = c(1, 1))
+    node.size <- array(nodesize, dim = c(1, 1))
+    fscore.train <- array(f_score.train, dim = c(1, 1))
+    fscore.valid <- array(f_score.valid, dim = c(1, 1))
+    result <- cbind(node.size, no.tree, fscore.train, fscore.valid)
+    results <- rbind(results, result)
+}
+
+# convert to dataframe
+results <- as.data.frame(results)
+colnames(results) <- c("nodesize","ntree","Fscore_train","Fscore_valid")
+
+#results %>% 
+#  top_n(n = 3, wt = Fscore_valid) %>%
+#  kable()
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-rf-performance2
+#| tbl-cap: The Performance Summary of Random Forest (Feature Selection)
+
+# Build RF using selected features.
+features_list <- rownames(filter(boruta_df, decision == 'Confirmed'))
+set.seed(123)
+class_weights <- c(0.70, 0.30)
+RF_classifier_best2 <- randomForest(y ~ .,
+                                    data=train[,c(features_list,"y")],
+                                    classwt=class_weights,
+                                    ntree=30,
+                                    nodesize=200)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+
+dataset <- c("Test")
+
+set.seed(123)
+# Prediction to test dataset
+test.pred <- predict(RF_classifier_best2, 
+                     newdata=test[,features_list],
+                     type="class")
+test$y <- factor(test$y, levels = levels(test.pred))
+
+f_score <- c(F1_Score(test.pred, test$y, positive="1"))
+precision <- c(Precision(test.pred, test$y, positive="1"))
+recall <- c(Recall(test.pred, test$y, positive="1"))
+
+performance_summary <- data.frame(Dataset = dataset, 
+                                  F_score = round(f_score, digits=4), 
+                                  Precision = round(precision, digits=4),
+                                  Recall = round(recall, digits=4))
+
+performance_summary %>%
+   kable()
+```
+
+**Model assessment:**
+
+In the model assessment phase, focusing on pertinent features yielded a modest enhancement in model performance. Specifically, by refining the Random Forest algorithm with a curated subset of features, we observed a slight uptick in the F1 Score, ascending from 47.30% to 48.15%. While this increment marks an improvement, its modest magnitude suggests further optimization may be required to achieve substantial gains in predictive accuracy.
+
+## iCResampling (SMOTE)
+
+Traditional ML might not perform well for imbalanced dataset because it will be bias to the majority class. SMOTE algorithm works by selecting minority class observations randomly and then find k nearest minority class neighbors, and then generate new samples by doing interpolation between them.
+
+```{r echo=FALSE, warning=FALSE, results='hide'}
+
+# Generate more samples for minority class using SMOTE
+set.seed(123)
+smote_train <- SMOTE(X = subset(train, select = -c(y)), 
+                     target = train[,"y"],
+                     dup_size = 3)
+smote_train <- smote_train$data # extract only the balanced dataset
+smote_train$class <- as.factor(smote_train$class)
+table(smote_train$class)
+```
+
+```{r echo=FALSE, warning=FALSE, results='hide'}
+#| label: tbl-summary-rf-performance4
+#| tbl-cap: The performance summary of Random Forest (Feature Selection)
+
+features_list <- rownames(filter(boruta_df, decision == 'Confirmed'))
+
+# Create empty dataframe
+results <-data.frame()
+for (nodesize in c(5,10,15,20,30,50))
+  for (ntree in c(5,10,30,50,100,200,300)) {
+    set.seed(123)
+    RF_classifier <- randomForest(class ~ .,
+                                  data=smote_train[,c(features_list,"class")],
+                                  ntree=ntree,
+                                  nodesize=nodesize)
+    
+    # predict to the train dataset, using F-score
+    train.pred <- predict(RF_classifier, 
+                          newdata=smote_train[,features_list],
+                          type="class")
+    smote_train$class <- factor(smote_train$class, levels = levels(train.pred))
+    f_score.train <- c(F1_Score(train.pred, smote_train$class, positive="1"))
+    
+    # predict to the validation dataset, using F-score
+    valid.pred <- predict(RF_classifier, 
+                          newdata=valid[,features_list],
+                          type="class")
+    valid$y <- factor(valid$y, levels = levels(valid.pred))
+    f_score.valid <- c(F1_Score(valid.pred, valid$y, positive="1"))
+    
+    # fill in the empty dataframe
+    no.tree <- array(ntree, dim = c(1, 1))
+    node.size <- array(nodesize, dim = c(1, 1))
+    fscore.train <- array(f_score.train, dim = c(1, 1))
+    fscore.valid <- array(f_score.valid, dim = c(1, 1))
+    result <- cbind(node.size, no.tree, fscore.train, fscore.valid)
+    results <- rbind(results, result)
+}
+
+# Convert to dataframe
+results <- as.data.frame(results)
+colnames(results) <- c("nodesize","ntree","Fscore_train","Fscore_valid")
+
+results %>% 
+  top_n(n = 3, wt = Fscore_valid) %>%
+  kable()
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| results: hide
+
+# Build RF using SMOTE samples.
+features_list <- rownames(filter(boruta_df, decision == 'Confirmed'))
+set.seed(123)
+RF_classifier_best3 <- randomForest(class ~ .,
+                                    data=smote_train[,c(features_list,"class")],
+                                    ntree=10,
+                                    nodesize=50)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: tbl-summary-rf-performance5
+#| tbl-cap: The performance summary of Random Forest (SMOTE Resampling).
+
+dataset <- c("Test")
+
+set.seed(123)
+# Prediction to test dataset
+test.pred <- predict(RF_classifier_best3, 
+                     newdata=test[,c(features_list,"y")],
+                     type="class")
+test$y <- factor(test$y, levels = levels(test.pred))
+
+f_score <- c(F1_Score(test.pred, test$y, positive="1"))
+precision <- c(Precision(test.pred, test$y, positive="1"))
+recall <- c(Recall(test.pred, test$y, positive="1"))
+
+performance_summary <- data.frame(Dataset = dataset, 
+                                  F_score = round(f_score, digits=4), 
+                                  Precision = round(precision, digits=4),
+                                  Recall = round(recall, digits=4))
+
+performance_summary %>%
+   kable()
+```
+
+**Model assessment:**
+
+Upon refining the Random Forest model with a dataset balanced by SMOTE, we encountered a tendency towards overfitting, as evidenced by a reduction in the F1 score to 46.04%. This outcome underscores the need for continued exploration into resampling techniques, aiming to optimize the methodology for addressing imbalances within the dataset.
+
+# Conclusion
+
+To conclude, our analysis aimed at predicting whether clients would subscribe to a bank term deposit, leveraging a dataset with 20 attributes through various machine learning models. The primary challenge faced was the class imbalance, where the majority of clients had not subscribed ('no'), making it crucial to employ methods like feature selection and resampling to enhance model performance.
+
+We experimented with several models, including Decision Trees, Random Forest, KNN, LDA, SVM, and employed techniques like Boruta for feature selection and SMOTE for addressing class imbalance. The Random Forest model emerged as notably effective, balancing precision and recall and thereby reducing both false positives and negatives---a crucial factor given the context of our predictive modeling.
+
+Through these methodologies, we observed the nuanced trade-offs between model complexity, feature relevance, and class balance. The Random Forest model, with its ability to handle feature interactions and its robustness to outliers, proved most effective in our case. It achieved a balance in precision and recall, demonstrating that with the right combination of features and class balance, it's possible to build a predictive model that can significantly aid in decision-making processes for marketing strategies.
+
+# References
+
+-   Team, D. (2018) *Boruta feature selection in R*, *DataCamp*. Available at: https://www.datacamp.com/tutorial/feature-selection-R-boruta (Accessed: 22 March 2024). 
+
+-   *RPubs*. Available at: https://rpubs.com/hwulanayu/smote-in-r (Accessed: 22 March 2024). 
+
+-   Olsen, L.R. (2024) *Creating a confusion matrix with cvms*. Available at: https://cran.r-project.org/web/packages/cvms/vignettes/Creating_a_confusion_matrix.html (Accessed: 22 March 2024). 
+
+-   Data Mining and Machine Learning Lecture Notes.
+
+-   Advanced Predictive Modeling Lecture Notes.
